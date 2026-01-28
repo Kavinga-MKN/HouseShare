@@ -34,13 +34,15 @@ const updateHouseSchema = z.object({
 
 export default function Settings() {
     const { profile, user } = useAuth();
-    const { getHousemates, updateHouseName, leaveHouse } = useHouse();
+    const { getHousemates, getHouseDetails, getMemberRole, updateHouseName, leaveHouse } = useHouse();
     const { toast } = useToast();
     const navigate = useNavigate();
 
     const [housemates, setHousemates] = useState<any[]>([]);
+    const [houseDetails, setHouseDetails] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false);
 
     const form = useForm({
         resolver: zodResolver(updateHouseSchema),
@@ -52,20 +54,29 @@ export default function Settings() {
     useEffect(() => {
         const loadData = async () => {
             if (profile?.current_house_id) {
-                // Set initial form value
-                // Note: We don't have the house NAME in profile currently, usually it's fetched separate. 
-                // For now, we'll fetch housemates. 
-                // Ideally we should have a useHouseDetails hook or similar, but for now we'll prioritize the list.
-
                 const members = await getHousemates(profile.current_house_id);
                 setHousemates(members);
+
+                const house = await getHouseDetails(profile.current_house_id);
+                if (house) {
+                    setHouseDetails(house);
+                    if (!form.getValues().name) {
+                        form.setValue('name', house.name);
+                    }
+                }
+
+                if (user) {
+                    const role = await getMemberRole(profile.current_house_id, user.uid);
+                    setIsAdmin(role === 'admin');
+                }
             }
             setLoading(false);
         };
         loadData();
-    }, [profile?.current_house_id]);
+    }, [profile?.current_house_id, user]);
 
     const onUpdateHouse = async (values: z.infer<typeof updateHouseSchema>) => {
+        if (!isAdmin) return;
         if (!profile?.current_house_id) return;
         setIsUpdating(true);
         try {
@@ -117,31 +128,28 @@ export default function Settings() {
                                     name="name"
                                     render={({ field }) => (
                                         <FormItem className="flex-1">
-                                            <FormLabel>House Name</FormLabel>
+                                            <FormLabel>House Name {isAdmin ? '' : '(Admin Only)'}</FormLabel>
                                             <FormControl>
-                                                <Input placeholder="Enter house name" {...field} />
+                                                <Input placeholder="Enter house name" {...field} disabled={!isAdmin} />
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     )}
                                 />
-                                <Button type="submit" disabled={isUpdating}>
-                                    {isUpdating ? <Save className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                                    Save
-                                </Button>
+                                {isAdmin && (
+                                    <Button type="submit" disabled={isUpdating}>
+                                        {isUpdating ? <Save className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                                        Save
+                                    </Button>
+                                )}
                             </form>
                         </Form>
                     </CardContent>
                 </Card>
 
                 {/* Invite Code */}
-                {/* We need the invite code, currently not in profile. 
-            Ideally we fetch the full House object. 
-            For now, let's assume we can pass a prop or fetch it.
-            Hack: We'll skip for this step or show placeholder if data missing.
-         */}
-                {/* <InviteCard inviteCode="123456" />  <-- We need to fetch this real data. */}
-                {/* Let's skip InviteCard for a moment if we lack data, or fetch it properly. */}
+                {/* Invite Code */}
+                {houseDetails && <InviteCard inviteCode={houseDetails.invite_code} />}
 
                 {/* Housemates List */}
                 <Card>

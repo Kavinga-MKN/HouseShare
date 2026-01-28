@@ -1,4 +1,4 @@
-
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useChores } from '@/hooks/useChores';
 import { useExpenses } from '@/hooks/useExpenses';
@@ -6,12 +6,30 @@ import { useAnnouncements } from '@/hooks/useAnnouncements';
 import { Home, DollarSign, ClipboardList, Bell, Users, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { format, isToday, isTomorrow } from 'date-fns';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '@/integrations/firebase/client';
 
 export default function Dashboard() {
   const { profile, user } = useAuth();
   const { chores } = useChores();
   const { expenses, balances } = useExpenses();
   const { announcements } = useAnnouncements();
+  const [memberCount, setMemberCount] = useState(1);
+
+  useEffect(() => {
+    if (!profile?.current_house_id) return;
+
+    const q = query(
+      collection(db, 'house_members'),
+      where('house_id', '==', profile.current_house_id)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setMemberCount(snapshot.size);
+    });
+
+    return () => unsubscribe();
+  }, [profile?.current_house_id]);
 
   // Chores Logic
   const pendingChores = chores.filter(c => c.status === 'pending');
@@ -97,8 +115,10 @@ export default function Dashboard() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1</div>
-            <p className="text-xs text-muted-foreground">Just you for now</p>
+            <div className="text-2xl font-bold">{memberCount}</div>
+            <p className="text-xs text-muted-foreground">
+              {memberCount === 1 ? 'Just you' : 'Total members'}
+            </p>
           </CardContent>
         </Card>
       </div>

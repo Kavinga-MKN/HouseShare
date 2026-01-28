@@ -1,15 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, List, Calendar as CalendarIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CreateChoreDialog } from '@/components/chores/CreateChoreDialog';
 import { ChoreCard } from '@/components/chores/ChoreCard';
 import { ChoresProvider, useChores } from '@/hooks/useChores';
+import { useHouse } from '@/hooks/useHouse';
+import { useAuth } from '@/hooks/useAuth';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
 
 function ChoresContent() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const { chores, loading } = useChores();
+    const { getMemberRole } = useHouse();
+    const { profile, user } = useAuth();
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    useEffect(() => {
+        if (profile?.current_house_id && user) {
+            getMemberRole(profile.current_house_id, user.uid).then(role => {
+                setIsAdmin(role === 'admin');
+            });
+        }
+    }, [profile?.current_house_id, user]);
 
     if (loading) {
         return <div className="p-8 text-center">Loading chores...</div>;
@@ -30,9 +43,12 @@ function ChoresContent() {
                     <h1 className="text-3xl font-bold tracking-tight">Chores</h1>
                     <p className="text-muted-foreground">Manage household tasks and schedules.</p>
                 </div>
-                <Button onClick={() => setIsDialogOpen(true)} className="w-full sm:w-auto">
-                    <Plus className="mr-2 h-4 w-4" /> Add Chore
-                </Button>
+
+                {isAdmin && (
+                    <Button onClick={() => setIsDialogOpen(true)} className="w-full sm:w-auto">
+                        <Plus className="mr-2 h-4 w-4" /> Add Chore
+                    </Button>
+                )}
             </div>
 
             <Tabs defaultValue="list" className="space-y-6">
@@ -110,7 +126,7 @@ function ChoresContent() {
             </Tabs>
 
             <CreateChoreDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} />
-        </div>
+        </div >
     );
 }
 

@@ -194,6 +194,33 @@ export function useHouse() {
     }
   };
 
+  const getHouseDetails = async (houseId: string) => {
+    try {
+      const houseDoc = await getDoc(doc(db, 'houses', houseId));
+      if (houseDoc.exists()) {
+        return { id: houseDoc.id, ...houseDoc.data() } as House;
+      }
+      return null;
+    } catch (err) {
+      console.error("Error fetching house details:", err);
+      return null;
+    }
+  };
+
+  const getMemberRole = async (houseId: string, userId: string) => {
+    try {
+      const memberRef = doc(db, 'house_members', `${houseId}_${userId}`);
+      const memberDoc = await getDoc(memberRef);
+      if (memberDoc.exists()) {
+        return memberDoc.data().role as 'admin' | 'member';
+      }
+      return null;
+    } catch (err) {
+      console.error("Error fetching member role:", err);
+      return null;
+    }
+  };
+
   const updateHouseName = async (houseId: string, newName: string) => {
     if (!user) return;
     setLoading(true);
@@ -237,6 +264,8 @@ export function useHouse() {
     createHouse,
     joinHouse,
     getHousemates,
+    getHouseDetails,
+    getMemberRole,
     updateHouseName,
     leaveHouse,
     loading,
