@@ -13,6 +13,11 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import HouseSelection from "./pages/HouseSelection";
 import Dashboard from "./pages/Dashboard";
+import Chores from "./pages/Chores";
+import Expenses from "./pages/Expenses";
+import Communication from "./pages/Communication";
+import Housemates from "./pages/Housemates";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -99,10 +104,7 @@ function AppRoutes() {
         element={
           <ProtectedRoute requireHouse>
             <AppLayout>
-              <div className="p-6">
-                <h1 className="text-2xl font-bold">Expenses</h1>
-                <p className="text-muted-foreground">Coming soon...</p>
-              </div>
+              <Expenses />
             </AppLayout>
           </ProtectedRoute>
         }
@@ -112,10 +114,7 @@ function AppRoutes() {
         element={
           <ProtectedRoute requireHouse>
             <AppLayout>
-              <div className="p-6">
-                <h1 className="text-2xl font-bold">Chores</h1>
-                <p className="text-muted-foreground">Coming soon...</p>
-              </div>
+              <Chores />
             </AppLayout>
           </ProtectedRoute>
         }
@@ -125,10 +124,7 @@ function AppRoutes() {
         element={
           <ProtectedRoute requireHouse>
             <AppLayout>
-              <div className="p-6">
-                <h1 className="text-2xl font-bold">Communication</h1>
-                <p className="text-muted-foreground">Coming soon...</p>
-              </div>
+              <Communication />
             </AppLayout>
           </ProtectedRoute>
         }
@@ -138,23 +134,17 @@ function AppRoutes() {
         element={
           <ProtectedRoute requireHouse>
             <AppLayout>
-              <div className="p-6">
-                <h1 className="text-2xl font-bold">Housemates</h1>
-                <p className="text-muted-foreground">Coming soon...</p>
-              </div>
+              <Housemates />
             </AppLayout>
           </ProtectedRoute>
         }
       />
       <Route
-        path="/house/settings"
+        path="/settings"
         element={
           <ProtectedRoute requireHouse>
             <AppLayout>
-              <div className="p-6">
-                <h1 className="text-2xl font-bold">House Settings</h1>
-                <p className="text-muted-foreground">Coming soon...</p>
-              </div>
+              <Settings />
             </AppLayout>
           </ProtectedRoute>
         }

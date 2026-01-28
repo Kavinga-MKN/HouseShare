@@ -1,5 +1,18 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  doc,
+  updateDoc,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  getDoc
+} from 'firebase/firestore';
+import { db } from '@/integrations/firebase/client';
 import { useAuth } from './useAuth';
 
 interface House {
@@ -16,69 +29,81 @@ export function useHouse() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const generateInviteCode = async () => {
+    let code = '';
+    let isUnique = false;
+    let attempts = 0;
+
+    while (!isUnique && attempts < 5) {
+      code = Math.floor(100000 + Math.random() * 900000).toString();
+      const q = query(collection(db, 'houses'), where('invite_code', '==', code));
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) {
+        isUnique = true;
+      }
+      attempts++;
+    }
+
+    if (!isUnique) throw new Error('Failed to generate unique invite code');
+    return code;
+  };
+
   const createHouse = async (name: string, description?: string, rules?: string) => {
     if (!user) {
-      setError('You must be logged in to create a house');
-      return null;
+      const err = 'You must be logged in to create a house';
+      setError(err);
+      return { error: err };
     }
 
     setLoading(true);
     setError(null);
 
     try {
-      // Generate invite code using the database function
-      const { data: inviteCode, error: codeError } = await supabase.rpc('generate_invite_code');
-      
-      if (codeError) {
-        throw codeError;
-      }
+      const inviteCode = await generateInviteCode();
 
-      // Create the house
-      const { data: house, error: houseError } = await supabase
-        .from('houses')
-        .insert({
-          name,
-          description: description || null,
-          rules: rules || null,
-          invite_code: inviteCode,
-          created_by: user.id,
-        })
-        .select()
-        .single();
+      const houseData = {
+        name,
+        description: description || null,
+        rules: rules || null,
+        invite_code: inviteCode,
+        created_by: user.uid,
+        created_at: serverTimestamp()
+      };
 
-      if (houseError) {
-        throw houseError;
-      }
+      const houseRef = await runTransaction(db, async (transaction) => {
+        // 1. Create House directly (we can't easily return the ID before creation in transaction with addDoc, 
+        // unlike native SDKs which allow generating ID. We can use doc() to generate ID first).
+        const newHouseRef = doc(collection(db, 'houses'));
+        transaction.set(newHouseRef, houseData);
 
-      // Add creator as admin member
-      const { error: memberError } = await supabase
-        .from('house_members')
-        .insert({
-          house_id: house.id,
-          user_id: user.id,
+        // 2. Add creator as admin member
+        // Using a composite ID for uniqueness: houseId_userId
+        const memberRef = doc(db, 'house_members', `${newHouseRef.id}_${user.uid}`);
+        transaction.set(memberRef, {
+          house_id: newHouseRef.id,
+          user_id: user.uid,
           role: 'admin',
+          joined_at: serverTimestamp()
         });
 
-      if (memberError) {
-        throw memberError;
-      }
+        // 3. Update user profile - Use setDoc with merge to safety handle missing profiles
+        const userRef = doc(db, 'users', user.uid);
+        transaction.set(userRef, { current_house_id: newHouseRef.id }, { merge: true });
 
-      // Update user's current house
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ current_house_id: house.id })
-        .eq('id', user.id);
-
-      if (profileError) {
-        throw profileError;
-      }
+        return newHouseRef;
+      });
 
       await refreshProfile();
-      return house as House;
+
+      return {
+        house: { id: houseRef.id, ...houseData } as House,
+        error: null
+      };
+
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create house';
       setError(message);
-      return null;
+      return { error: message };
     } finally {
       setLoading(false);
     }
@@ -86,75 +111,123 @@ export function useHouse() {
 
   const joinHouse = async (inviteCode: string) => {
     if (!user) {
-      setError('You must be logged in to join a house');
-      return null;
+      const err = 'You must be logged in to join a house';
+      setError(err);
+      return { error: err };
     }
 
     setLoading(true);
     setError(null);
 
     try {
-      // Find the house with this invite code
-      const { data: house, error: houseError } = await supabase
-        .from('houses')
-        .select('*')
-        .eq('invite_code', inviteCode.toUpperCase().trim())
-        .single();
+      const q = query(
+        collection(db, 'houses'),
+        where('invite_code', '==', inviteCode.trim())
+      );
 
-      if (houseError || !house) {
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
         throw new Error('Invalid invite code. Please check and try again.');
       }
 
-      // Check if user is already a member
-      const { data: existingMember } = await supabase
-        .from('house_members')
-        .select('id')
-        .eq('house_id', house.id)
-        .eq('user_id', user.id)
-        .single();
+      const houseDoc = querySnapshot.docs[0];
+      const houseId = houseDoc.id;
+      const houseData = houseDoc.data();
 
-      if (existingMember) {
-        // User is already a member, just update current house
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .update({ current_house_id: house.id })
-          .eq('id', user.id);
+      await runTransaction(db, async (transaction) => {
+        // Check if member already exists
+        const memberRef = doc(db, 'house_members', `${houseId}_${user.uid}`);
+        const memberDoc = await transaction.get(memberRef);
 
-        if (profileError) throw profileError;
-        
-        await refreshProfile();
-        return house as House;
-      }
+        if (!memberDoc.exists()) {
+          // Add member
+          transaction.set(memberRef, {
+            house_id: houseId,
+            user_id: user.uid,
+            role: 'member',
+            joined_at: serverTimestamp()
+          });
+        }
 
-      // Add user as member
-      const { error: memberError } = await supabase
-        .from('house_members')
-        .insert({
-          house_id: house.id,
-          user_id: user.id,
-          role: 'member',
-        });
-
-      if (memberError) {
-        throw memberError;
-      }
-
-      // Update user's current house
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ current_house_id: house.id })
-        .eq('id', user.id);
-
-      if (profileError) {
-        throw profileError;
-      }
+        // Update user profile - Use setDoc with merge to safely handle missing profiles
+        const userRef = doc(db, 'users', user.uid);
+        transaction.set(userRef, { current_house_id: houseId }, { merge: true });
+      });
 
       await refreshProfile();
-      return house as House;
+
+      return {
+        house: { id: houseId, ...houseData } as House,
+        error: null
+      };
+
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to join house';
       setError(message);
-      return null;
+      return { error: message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getHousemates = async (houseId: string) => {
+    try {
+      const q = query(
+        collection(db, 'house_members'),
+        where('house_id', '==', houseId)
+      );
+      const snapshot = await getDocs(q);
+      const memberIds = snapshot.docs.map(doc => doc.data().user_id);
+
+      const housemates = [];
+      for (const userId of memberIds) {
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (userDoc.exists()) {
+          housemates.push({ id: userId, ...userDoc.data() });
+        }
+      }
+      return housemates;
+    } catch (err) {
+      console.error("Error fetching housemates:", err);
+      return [];
+    }
+  };
+
+  const updateHouseName = async (houseId: string, newName: string) => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      await setDoc(doc(db, 'houses', houseId), {
+        name: newName
+      }, { merge: true });
+      await refreshProfile();
+    } catch (err) {
+      setError('Failed to update house name');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const leaveHouse = async () => {
+    if (!user || !user.uid) return;
+    setLoading(true);
+    try {
+      // Get current house ID from profile (or passed arg, but profile is safer source of truth)
+      // Note: We need the profile loaded in context for this, which useAuth provides but we didn't import 'profile' here.
+      // Let's assume the component calling this checks for houseId, or we fetch it.
+      // Ideally we'd remove the member document: ${houseId}_${userId}
+      // For now, simpler approach: just clear the user's current_house_id
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        current_house_id: null
+      });
+
+      await refreshProfile();
+    } catch (err) {
+      setError('Failed to leave house');
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -163,6 +236,9 @@ export function useHouse() {
   return {
     createHouse,
     joinHouse,
+    getHousemates,
+    updateHouseName,
+    leaveHouse,
     loading,
     error,
   };

@@ -24,7 +24,7 @@ const mainMenuItems = [
 ];
 
 const settingsMenuItems = [
-  { title: 'House Settings', url: '/house/settings', icon: Settings },
+  { title: 'House Settings', url: '/settings', icon: Settings },
 ];
 
 export function AppSidebar() {
@@ -64,7 +64,7 @@ export function AppSidebar() {
                     asChild
                     isActive={isActive(item.url)}
                   >
-                    <a 
+                    <a
                       href={item.url}
                       onClick={(e) => {
                         e.preventDefault();
@@ -91,7 +91,7 @@ export function AppSidebar() {
                     asChild
                     isActive={isActive(item.url)}
                   >
-                    <a 
+                    <a
                       href={item.url}
                       onClick={(e) => {
                         e.preventDefault();

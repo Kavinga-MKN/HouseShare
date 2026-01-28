@@ -24,12 +24,12 @@ const joinHouseSchema = z.object({
 export default function HouseSelection() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
-  
+
   // Create house form state
   const [houseName, setHouseName] = useState('');
   const [houseDescription, setHouseDescription] = useState('');
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
-  
+
   // Join house form state
   const [inviteCode, setInviteCode] = useState('');
   const [joinErrors, setJoinErrors] = useState<Record<string, string>>({});
@@ -53,8 +53,8 @@ export default function HouseSelection() {
       return;
     }
 
-    const house = await createHouse(houseName, houseDescription);
-    
+    const { house, error: actionError } = await createHouse(houseName, houseDescription);
+
     if (house) {
       toast({
         title: 'House created!',
@@ -62,10 +62,10 @@ export default function HouseSelection() {
       });
       setShowCreateDialog(false);
       navigate('/dashboard');
-    } else if (error) {
+    } else if (actionError) {
       toast({
         title: 'Failed to create house',
-        description: error,
+        description: actionError,
         variant: 'destructive',
       });
     }
@@ -85,8 +85,8 @@ export default function HouseSelection() {
       return;
     }
 
-    const house = await joinHouse(inviteCode);
-    
+    const { house, error: actionError } = await joinHouse(inviteCode);
+
     if (house) {
       toast({
         title: 'Joined house!',
@@ -94,10 +94,10 @@ export default function HouseSelection() {
       });
       setShowJoinDialog(false);
       navigate('/dashboard');
-    } else if (error) {
+    } else if (actionError) {
       toast({
         title: 'Failed to join house',
-        description: error,
+        description: actionError,
         variant: 'destructive',
       });
     }

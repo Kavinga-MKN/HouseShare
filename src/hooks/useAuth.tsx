@@ -1,6 +1,15 @@
 import { useEffect, useState, createContext, useContext, ReactNode } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  User,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  signInWithPopup,
+  GoogleAuthProvider
+} from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '@/integrations/firebase/client';
 
 interface Profile {
   id: string;
@@ -11,11 +20,11 @@ interface Profile {
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
   profile: Profile | null;
   loading: boolean;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signInWithGoogle: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -24,98 +33,100 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+    try {
+      const docRef = doc(db, 'users', userId);
+      const docSnap = await getDoc(docRef);
 
-    if (error) {
+      if (docSnap.exists()) {
+        return { id: docSnap.id, ...docSnap.data() } as Profile;
+      }
+      return null;
+    } catch (error) {
       console.error('Error fetching profile:', error);
       return null;
     }
-    return data as Profile;
   };
 
   const refreshProfile = async () => {
     if (user) {
-      const profileData = await fetchProfile(user.id);
+      const profileData = await fetchProfile(user.uid);
       setProfile(profileData);
     }
   };
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
 
-        if (session?.user) {
-          // Use setTimeout to avoid potential deadlocks
-          setTimeout(async () => {
-            const profileData = await fetchProfile(session.user.id);
-            setProfile(profileData);
-            setLoading(false);
-          }, 0);
-        } else {
-          setProfile(null);
-          setLoading(false);
-        }
-      }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-
-      if (session?.user) {
-        fetchProfile(session.user.id).then((profileData) => {
-          setProfile(profileData);
-          setLoading(false);
-        });
+      if (currentUser) {
+        const profileData = await fetchProfile(currentUser.uid);
+        setProfile(profileData);
       } else {
-        setLoading(false);
+        setProfile(null);
       }
+      setLoading(false);
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: {
-          full_name: fullName,
-        },
-      },
-    });
-    return { error };
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      // Create user profile in Firestore
+      await setDoc(doc(db, 'users', userCredential.user.uid), {
+        id: userCredential.user.uid,
+        full_name: fullName,
+        email: email, // Optional: store email in profile too
+        current_house_id: null,
+        created_at: new Date().toISOString()
+      });
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error };
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
+
+  const signInWithGoogle = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+
+      // Check if profile exists, if not create it
+      const profileData = await fetchProfile(result.user.uid);
+      if (!profileData) {
+        await setDoc(doc(db, 'users', result.user.uid), {
+          id: result.user.uid,
+          full_name: result.user.displayName,
+          avatar_url: result.user.photoURL,
+          email: result.user.email,
+          current_house_id: null,
+          created_at: new Date().toISOString()
+        });
+      }
+
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    await firebaseSignOut(auth);
     setUser(null);
-    setSession(null);
     setProfile(null);
   };
 
@@ -123,11 +134,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
-        session,
         profile,
         loading,
         signUp,
         signIn,
+        signInWithGoogle,
         signOut,
         refreshProfile,
       }}
